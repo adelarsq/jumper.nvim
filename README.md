@@ -4,7 +4,7 @@ A simple plugin to jump between files.
 
 ## Installation 🧙
 
-### [Lazy](https://github.com/folke/lazy.nvim)
+### [Lazy](https://github.com/folke/lazy.nvim) 🐢
 
 Add the following lines on the NeoVim config file (Lua):
 
@@ -19,7 +19,7 @@ require('lazy').setup({
 }, {})
 ```
 
-## Commands
+## Commands 🧩
 
 - JumperAdd - add current file to the list
 - JumperList - show current file list on quickfix
