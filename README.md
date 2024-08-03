@@ -21,7 +21,7 @@ require('lazy').setup({
 
 ## Commands 🧩
 
-- JumperAdd - add current file to the list
+- JumperAdd - add current file to the list. Supports oil and nvim-tree plugin.
 - JumperList - show current file list on quickfix
 - JumperJump - jump to file by index 
 
