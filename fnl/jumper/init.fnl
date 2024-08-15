@@ -45,10 +45,10 @@
 
 ;; Get current file list
 (fn get-file-list []
-  (vim.api.nvim_echo [["Current file list:" "None"]] false {})
+  ; (vim.api.nvim_echo [["Current file list:" "None"]] false {})
   (local list {})
   (each [i file (ipairs files)]
-    (vim.api.nvim_echo [[(.. i ": " file) "None"]] false {})
+    ; (vim.api.nvim_echo [[(.. i ": " file) "None"]] false {})
     (local dic {:filename file :text ""})
     (table.insert list dic))
   (vim.fn.setqflist list)
@@ -59,7 +59,9 @@
   (local file (nth files index))
   (if file
       (vim.cmd (.. "edit " file))
-      (vim.api.nvim_echo [[(.. "Invalid index: " index) "ErrorMsg"]] false {})))
+      ; (vim.api.nvim_echo [[(.. "Invalid index: " index) "ErrorMsg"]] false {})
+  )
+)
 
 ;; Command that add current file
 (vim.api.nvim_create_user_command "JumperAdd" add-current-file {})
