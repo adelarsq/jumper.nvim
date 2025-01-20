@@ -48,7 +48,6 @@
   ; (vim.api.nvim_echo [["Current file list:" "None"]] false {})
   (local list {})
   (each [i file (ipairs files)]
-    ; (vim.api.nvim_echo [[(.. i ": " file) "None"]] false {})
     (local dic {:filename file :text ""})
     (table.insert list dic))
   (vim.fn.setqflist list)
@@ -56,11 +55,21 @@
 
 ;; Navigate to a file by index
 (fn navigate-to-file [index]
-  (local file (nth files index))
+  (local file (vim.fn.get files index))
   (if file
       (vim.cmd (.. "edit " file))
       ; (vim.api.nvim_echo [[(.. "Invalid index: " index) "ErrorMsg"]] false {})
   )
+)
+
+(fn navigate-to-next-file []
+   (let [current-index (vim.fn.index files (vim.fn.expand "%:p"))]
+     (let [next-index (if (= (+ current-index 1) (length files))
+                          0
+                          (+ current-index 1))]
+        (navigate-to-file next-index)
+     )
+   )
 )
 
 ;; Command that add current file
@@ -73,6 +82,9 @@
 (vim.api.nvim_create_user_command "JumperJump" (fn [opts]
   (navigate-to-file (tonumber (vim.fn.input "Enter file index: "))))
   {})
+
+;; Command to navigate to the next file
+(vim.api.nvim_create_user_command "JumperNext" navigate-to-next-file {})
 
 (fn M.setup []
   (set vim.g.loaded_jumper 1))

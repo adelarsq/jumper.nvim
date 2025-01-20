@@ -60,19 +60,30 @@ local function get_file_list()
   return vim.cmd("bel copen 10")
 end
 local function navigate_to_file(index)
-  local file = nth(files, index)
+  local file = vim.fn.get(files, index)
   if file then
     return vim.cmd(("edit " .. file))
   else
     return nil
   end
 end
+local function navigate_to_next_file()
+  local current_index = vim.fn.index(files, vim.fn.expand("%:p"))
+  local next_index
+  if ((current_index + 1) == #files) then
+    next_index = 0
+  else
+    next_index = (current_index + 1)
+  end
+  return navigate_to_file(next_index)
+end
 vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
-local function _8_(opts)
+local function _9_(opts)
   return navigate_to_file(tonumber(vim.fn.input("Enter file index: ")))
 end
-vim.api.nvim_create_user_command("JumperJump", _8_, {})
+vim.api.nvim_create_user_command("JumperJump", _9_, {})
+vim.api.nvim_create_user_command("JumperNext", navigate_to_next_file, {})
 M.setup = function()
   vim.g.loaded_jumper = 1
   return nil
