@@ -32,5 +32,6 @@ Thanks goes to these people/projects for inspiration:
 - [ThePrimeagen/harpoon](https://github.com/ThePrimeagen/harpoon)
 - [0x7a7a/bufpin.nvim](https://github.com/0x7a7a/bufpin.nvim)
 - [volskaya/windovigation.nvim](https://github.com/volskaya/windovigation.nvim)
+- [alucherdi/hand-of-god](https://github.com/alucherdi/hand-of-god)
 
 
