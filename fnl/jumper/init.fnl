@@ -72,6 +72,22 @@
    )
 )
 
+;; Allows to create one terminal per tab
+(set vim.t.terminal_bufnr nil)
+
+;; Command that toggle the terminal or open a new
+(fn toggle-or-open-terminal []
+  (if (and vim.t.terminal_bufnr (vim.api.nvim_buf_is_valid vim.t.terminal_bufnr))
+      (if (= (vim.api.nvim_get_current_buf) vim.t.terminal_bufnr)
+          (vim.api.nvim_command "b#")
+          (vim.api.nvim_command (.. "buffer " vim.t.terminal_bufnr))
+          (vim.api.nvim_feedkeys "i" "n" false))
+      (do
+        (vim.api.nvim_command "enew")  ; allows to go back
+        (vim.api.nvim_command "terminal")
+        (set vim.t.terminal_bufnr (vim.api.nvim_get_current_buf))
+        (vim.api.nvim_feedkeys "i" "n" false))))
+
 ;; Command that add current file
 (vim.api.nvim_create_user_command "JumperAdd" add-current-file {})
 
@@ -85,6 +101,8 @@
 
 ;; Command to navigate to the next file
 (vim.api.nvim_create_user_command "JumperNext" navigate-to-next-file {})
+
+(vim.api.nvim_create_user_command "JumperTerminal" toggle-or-open-terminal {})
 
 (fn M.setup []
   (set vim.g.loaded_jumper 1))
