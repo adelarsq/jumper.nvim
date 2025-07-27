@@ -59,6 +59,10 @@ local function get_file_list()
   vim.fn.setqflist(list)
   return vim.cmd("bel copen 10")
 end
+local function clear_file_list()
+  vim.g.file_list = {}
+  return nil
+end
 local function navigate_to_file(index)
   local file = vim.fn.get(files, index)
   if file then
@@ -96,6 +100,7 @@ local function toggle_or_open_terminal()
 end
 vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
+vim.api.nvim_create_user_command("JumperClear", clear_file_list, {})
 local function _11_(opts)
   return navigate_to_file(tonumber(vim.fn.input("Enter file index: ")))
 end

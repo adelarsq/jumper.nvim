@@ -53,6 +53,10 @@
   (vim.fn.setqflist list)
   (vim.cmd "bel copen 10"))
 
+;; Clear file list
+(fn clear-file-list []
+  (set vim.g.file_list {}))
+
 ;; Navigate to a file by index
 (fn navigate-to-file [index]
   (local file (vim.fn.get files index))
@@ -93,6 +97,9 @@
 
 ;; Command that show current file list
 (vim.api.nvim_create_user_command "JumperList" get-file-list {})
+
+;; Command that clear current file list
+(vim.api.nvim_create_user_command "JumperClear" clear-file-list {})
 
 ;; Command to navigage to the given file index
 (vim.api.nvim_create_user_command "JumperJump" (fn [opts]
