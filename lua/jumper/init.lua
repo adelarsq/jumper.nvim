@@ -60,12 +60,7 @@ local function get_file_list()
     end
     local function _8_(choice)
       if choice then
-        vim.cmd(("edit " .. choice.filename))
-        local qf_list = {}
-        for i, file in ipairs(files) do
-          table.insert(qf_list, {filename = file, text = ""})
-        end
-        return vim.fn.setqflist(qf_list)
+        return vim.cmd(("edit " .. choice.filename))
       else
         return nil
       end
@@ -87,11 +82,12 @@ local function clear_file_list()
   return vim.api.nvim_echo({{"File list cleared.", "WarningMsg"}}, false, {})
 end
 local function navigate_to_file(index)
-  if (index and (index >= 1) and (index <= #files)) then
+  local len = #files
+  if (index and (index >= 1) and (index <= len)) then
     local file = files[index]
     return vim.cmd(("edit " .. file))
   else
-    return vim.api.nvim_echo({{("Invalid index: " .. (index or "nil")), "ErrorMsg"}}, false, {})
+    return vim.api.nvim_echo({{("Invalid index: " .. (index or "nil") .. ". Valid range: 1-" .. len), "ErrorMsg"}}, false, {})
   end
 end
 local function navigate_to_file_select()
@@ -115,21 +111,53 @@ local function navigate_to_file_select()
     return vim.ui.select(items, {prompt = "Jump to file:", format_item = _12_, kind = "file"}, _13_)
   end
 end
+local function get_current_file_index()
+  local current_file = vim.fn.expand("%:p")
+  local len = #files
+  local found_index = -1
+  for i = 1, len do
+    if (files[i] == current_file) then
+      found_index = i
+    else
+    end
+  end
+  return found_index
+end
 local function navigate_to_next_file()
-  if (#files == 0) then
+  local len = #files
+  if (len == 0) then
     return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
   else
-    local current_index = vim.fn.index(files, vim.fn.expand("%:p"))
-    if (current_index >= 0) then
+    local current_index = get_current_file_index()
+    if (current_index >= 1) then
       local next_index
-      if ((current_index + 1) == #files) then
-        next_index = 0
+      if (current_index == len) then
+        next_index = 1
       else
         next_index = (current_index + 1)
       end
       return navigate_to_file(next_index)
     else
-      return vim.api.nvim_echo({{"Current file not in the list. Use JumperJump to select.", "WarningMsg"}}, false, {})
+      return navigate_to_file(1)
+    end
+  end
+end
+local function navigate_to_previous_file()
+  local len = #files
+  if (len == 0) then
+    return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
+  else
+    local current_index = get_current_file_index()
+    if (current_index >= 1) then
+      local prev_index
+      if (current_index == 1) then
+        prev_index = len
+      else
+        prev_index = (current_index - 1)
+      end
+      return navigate_to_file(prev_index)
+    else
+      return navigate_to_file(len)
     end
   end
 end
@@ -153,7 +181,7 @@ vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
 vim.api.nvim_create_user_command("JumperListQF", get_file_list_quickfix, {})
 vim.api.nvim_create_user_command("JumperClear", clear_file_list, {})
-local function _21_(opts)
+local function _25_(opts)
   if (#files == 0) then
     return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
   else
@@ -164,8 +192,9 @@ local function _21_(opts)
     end
   end
 end
-vim.api.nvim_create_user_command("JumperJump", _21_, {count = true})
+vim.api.nvim_create_user_command("JumperJump", _25_, {count = true})
 vim.api.nvim_create_user_command("JumperNext", navigate_to_next_file, {})
+vim.api.nvim_create_user_command("JumperPrevious", navigate_to_previous_file, {})
 vim.api.nvim_create_user_command("JumperTerminal", toggle_or_open_terminal, {})
 M.setup = function()
   vim.g.loaded_jumper = 1

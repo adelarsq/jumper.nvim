@@ -57,12 +57,7 @@
            :kind "file"}
           (fn [choice]
             (when choice
-              (vim.cmd (.. "edit " choice.filename))
-              ;; Also update quickfix list for compatibility
-              (let [qf-list []]
-                (each [i file (ipairs files)]
-                  (table.insert qf-list {:filename file :text ""}))
-                (vim.fn.setqflist qf-list))))))))
+              (vim.cmd (.. "edit " choice.filename))))))))
 
 ;; Legacy function to show in quickfix (backward compatibility)
 (fn get-file-list-quickfix []
@@ -78,12 +73,13 @@
   (set vim.g.file_list {})
   (vim.api.nvim_echo [["File list cleared." "WarningMsg"]] false {}))
 
-;; Navigate to a file by index
+;; Navigate to a file by index (1-based)
 (fn navigate-to-file [index]
-  (if (and index (>= index 1) (<= index (length files)))
-      (let [file (. files index)]
-        (vim.cmd (.. "edit " file)))
-      (vim.api.nvim_echo [[(.. "Invalid index: " (or index "nil")) "ErrorMsg"]] false {})))
+  (let [len (length files)]
+    (if (and index (>= index 1) (<= index len))
+        (let [file (. files index)]
+          (vim.cmd (.. "edit " file)))
+        (vim.api.nvim_echo [[(.. "Invalid index: " (or index "nil") ". Valid range: 1-" len) "ErrorMsg"]] false {}))))
 
 ;; Navigate to a file using vim.ui.select
 (fn navigate-to-file-select []
@@ -102,17 +98,41 @@
             (when choice
               (vim.cmd (.. "edit " choice.filename))))))))
 
-;; Navigate to next file
+;; Find current file index in the list
+(fn get-current-file-index []
+  (let [current-file (vim.fn.expand "%:p")
+        len (length files)]
+    (var found-index -1)
+    (for [i 1 len]
+      (when (= (. files i) current-file)
+        (set found-index i)))
+    found-index))
+
+;; Navigate to next file (with wrap-around)
 (fn navigate-to-next-file []
-  (if (= (length files) 0)
-      (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
-      (let [current-index (vim.fn.index files (vim.fn.expand "%:p"))]
-        (if (>= current-index 0)
-            (let [next-index (if (= (+ current-index 1) (length files))
-                               0
-                               (+ current-index 1))]
-              (navigate-to-file next-index))
-            (vim.api.nvim_echo [["Current file not in the list. Use JumperJump to select." "WarningMsg"]] false {})))))
+  (let [len (length files)]
+    (if (= len 0)
+        (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
+        (let [current-index (get-current-file-index)]
+          (if (>= current-index 1)
+              ;; Current file is in the list, go to next with wrap-around
+              (let [next-index (if (= current-index len) 1 (+ current-index 1))]
+                (navigate-to-file next-index))
+              ;; Current file not in list, start from first
+              (navigate-to-file 1))))))
+
+;; Navigate to previous file (with wrap-around)
+(fn navigate-to-previous-file []
+  (let [len (length files)]
+    (if (= len 0)
+        (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
+        (let [current-index (get-current-file-index)]
+          (if (>= current-index 1)
+              ;; Current file is in the list, go to previous with wrap-around
+              (let [prev-index (if (= current-index 1) len (- current-index 1))]
+                (navigate-to-file prev-index))
+              ;; Current file not in list, start from last
+              (navigate-to-file len))))))
 
 ;; Allows to create one terminal per tab
 (set vim.t.terminal_bufnr nil)
@@ -143,7 +163,7 @@
 ;; Command that clear current file list
 (vim.api.nvim_create_user_command "JumperClear" clear-file-list {})
 
-;; Command to navigate to the given file index
+;; Command to navigate to the given file index or show menu
 (vim.api.nvim_create_user_command "JumperJump" (fn [opts]
   (if (= (length files) 0)
       (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
@@ -157,6 +177,9 @@
 ;; Command to navigate to the next file
 (vim.api.nvim_create_user_command "JumperNext" navigate-to-next-file {})
 
+;; Command to navigate to the previous file
+(vim.api.nvim_create_user_command "JumperPrevious" navigate-to-previous-file {})
+
 ;; Terminal command
 (vim.api.nvim_create_user_command "JumperTerminal" toggle-or-open-terminal {})
 
@@ -164,3 +187,4 @@
   (set vim.g.loaded_jumper 1))
 
 M
+
