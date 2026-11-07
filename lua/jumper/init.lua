@@ -181,18 +181,6 @@ vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
 vim.api.nvim_create_user_command("JumperListQF", get_file_list_quickfix, {})
 vim.api.nvim_create_user_command("JumperClear", clear_file_list, {})
-local function _25_(opts)
-  if (#files == 0) then
-    return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
-  else
-    if (opts.count and (opts.count > 0)) then
-      return navigate_to_file(opts.count)
-    else
-      return navigate_to_file_select()
-    end
-  end
-end
-vim.api.nvim_create_user_command("JumperJump", _25_, {count = true})
 vim.api.nvim_create_user_command("JumperNext", navigate_to_next_file, {})
 vim.api.nvim_create_user_command("JumperPrevious", navigate_to_previous_file, {})
 vim.api.nvim_create_user_command("JumperTerminal", toggle_or_open_terminal, {})

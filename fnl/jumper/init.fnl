@@ -163,17 +163,6 @@
 ;; Command that clear current file list
 (vim.api.nvim_create_user_command "JumperClear" clear-file-list {})
 
-;; Command to navigate to the given file index or show menu
-(vim.api.nvim_create_user_command "JumperJump" (fn [opts]
-  (if (= (length files) 0)
-      (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
-      ;; If count is provided, jump directly
-      (if (and opts.count (> opts.count 0))
-          (navigate-to-file opts.count)
-          ;; Otherwise show vim.ui.select menu
-          (navigate-to-file-select))))
-  {:count true})
-
 ;; Command to navigate to the next file
 (vim.api.nvim_create_user_command "JumperNext" navigate-to-next-file {})
 
