@@ -262,6 +262,30 @@
     (if (= len 0)
         (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
         (let [current-index (get-current-file-index)]
+          (if (< current-index 1)
+              ;; Current file not in list, start from last
+              (navigate-to-file len)
+              (let [current-dir (get-file-dir (. files current-index))]
+                (var prev-index nil)
+                ;; Search backward for previous file in same directory (with wrap)
+                (for [offset 1 len]
+                  (when (not prev-index)
+                    (let [candidate-index (if (<= (- current-index offset) 0)
+                                               (+ (- current-index offset) len)
+                                               (- current-index offset))]
+                      (when (= (get-file-dir (. files candidate-index)) current-dir)
+                        (set prev-index candidate-index)))))
+                (if prev-index
+                    (navigate-to-file prev-index)
+                    (vim.api.nvim_echo
+                      [["No other file from the same directory in the list." "WarningMsg"]]
+                      false {}))))))))
+
+(fn navigate-to-previous-file-global []
+  (let [len (length files)]
+    (if (= len 0)
+        (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
+        (let [current-index (get-current-file-index)]
           (if (>= current-index 1)
               (let [prev-index (if (= current-index 1) len (- current-index 1))]
                 (navigate-to-file prev-index))
@@ -290,6 +314,7 @@
 (vim.api.nvim_create_user_command "JumperNext" navigate-to-next-file {})
 (vim.api.nvim_create_user_command "JumperNextGlobal" navigate-to-next-file-global {})
 (vim.api.nvim_create_user_command "JumperPrevious" navigate-to-previous-file {})
+(vim.api.nvim_create_user_command "JumperPreviousGlobal" navigate-to-previous-file-global {})
 
 (fn M.setup []
   (set vim.g.loaded_jumper 1))

@@ -309,6 +309,40 @@ local function navigate_to_previous_file()
     return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
   else
     local current_index = get_current_file_index()
+    if (current_index < 1) then
+      return navigate_to_file(len)
+    else
+      local current_dir0 = get_file_dir(files[current_index])
+      local prev_index = nil
+      for offset = 1, len do
+        if not prev_index then
+          local candidate_index
+          if ((current_index - offset) <= 0) then
+            candidate_index = ((current_index - offset) + len)
+          else
+            candidate_index = (current_index - offset)
+          end
+          if (get_file_dir(files[candidate_index]) == current_dir0) then
+            prev_index = candidate_index
+          else
+          end
+        else
+        end
+      end
+      if prev_index then
+        return navigate_to_file(prev_index)
+      else
+        return vim.api.nvim_echo({{"No other file from the same directory in the list.", "WarningMsg"}}, false, {})
+      end
+    end
+  end
+end
+local function navigate_to_previous_file_global()
+  local len = #files
+  if (len == 0) then
+    return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
+  else
+    local current_index = get_current_file_index()
     if (current_index >= 1) then
       local prev_index
       if (current_index == 1) then
@@ -322,11 +356,11 @@ local function navigate_to_previous_file()
     end
   end
 end
-local function _37_()
+local function _43_()
   reload_files()
   return vim.api.nvim_echo({{("Jumper: carregada lista para " .. vim.fn.getcwd())}}, false, {})
 end
-vim.api.nvim_create_autocmd("DirChanged", {callback = _37_})
+vim.api.nvim_create_autocmd("DirChanged", {callback = _43_})
 vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
 vim.api.nvim_create_user_command("JumperListQF", get_file_list_quickfix, {})
@@ -335,6 +369,7 @@ vim.api.nvim_create_user_command("JumperRemove", remove_current_file, {})
 vim.api.nvim_create_user_command("JumperNext", navigate_to_next_file, {})
 vim.api.nvim_create_user_command("JumperNextGlobal", navigate_to_next_file_global, {})
 vim.api.nvim_create_user_command("JumperPrevious", navigate_to_previous_file, {})
+vim.api.nvim_create_user_command("JumperPreviousGlobal", navigate_to_previous_file_global, {})
 M.setup = function()
   vim.g.loaded_jumper = 1
   return nil
