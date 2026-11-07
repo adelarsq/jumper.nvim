@@ -322,27 +322,11 @@ local function navigate_to_previous_file()
     end
   end
 end
-vim.t.terminal_bufnr = nil
-local function toggle_or_open_terminal()
-  if (vim.t.terminal_bufnr and vim.api.nvim_buf_is_valid(vim.t.terminal_bufnr)) then
-    if (vim.api.nvim_get_current_buf() == vim.t.terminal_bufnr) then
-      return vim.api.nvim_command("b#")
-    else
-      vim.api.nvim_command(("buffer " .. vim.t.terminal_bufnr))
-      return vim.api.nvim_feedkeys("i", "n", false)
-    end
-  else
-    vim.api.nvim_command("enew")
-    vim.api.nvim_command("terminal")
-    vim.t.terminal_bufnr = vim.api.nvim_get_current_buf()
-    return vim.api.nvim_feedkeys("i", "n", false)
-  end
-end
-local function _39_()
+local function _37_()
   reload_files()
   return vim.api.nvim_echo({{("Jumper: carregada lista para " .. vim.fn.getcwd())}}, false, {})
 end
-vim.api.nvim_create_autocmd("DirChanged", {callback = _39_})
+vim.api.nvim_create_autocmd("DirChanged", {callback = _37_})
 vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
 vim.api.nvim_create_user_command("JumperListQF", get_file_list_quickfix, {})
@@ -351,7 +335,6 @@ vim.api.nvim_create_user_command("JumperRemove", remove_current_file, {})
 vim.api.nvim_create_user_command("JumperNext", navigate_to_next_file, {})
 vim.api.nvim_create_user_command("JumperNextGlobal", navigate_to_next_file_global, {})
 vim.api.nvim_create_user_command("JumperPrevious", navigate_to_previous_file, {})
-vim.api.nvim_create_user_command("JumperTerminal", toggle_or_open_terminal, {})
 M.setup = function()
   vim.g.loaded_jumper = 1
   return nil

@@ -267,21 +267,6 @@
                 (navigate-to-file prev-index))
               (navigate-to-file len))))))
 
-(set vim.t.terminal_bufnr nil)
-
-(fn toggle-or-open-terminal []
-  (if (and vim.t.terminal_bufnr (vim.api.nvim_buf_is_valid vim.t.terminal_bufnr))
-      (if (= (vim.api.nvim_get_current_buf) vim.t.terminal_bufnr)
-          (vim.api.nvim_command "b#")
-          (do
-            (vim.api.nvim_command (.. "buffer " vim.t.terminal_bufnr))
-            (vim.api.nvim_feedkeys "i" "n" false)))
-      (do
-        (vim.api.nvim_command "enew")
-        (vim.api.nvim_command "terminal")
-        (set vim.t.terminal_bufnr (vim.api.nvim_get_current_buf))
-        (vim.api.nvim_feedkeys "i" "n" false))))
-
 ;; ============================================================================
 ;; Auto-reload quando o diretório de trabalho muda
 ;; ============================================================================
@@ -305,7 +290,6 @@
 (vim.api.nvim_create_user_command "JumperNext" navigate-to-next-file {})
 (vim.api.nvim_create_user_command "JumperNextGlobal" navigate-to-next-file-global {})
 (vim.api.nvim_create_user_command "JumperPrevious" navigate-to-previous-file {})
-(vim.api.nvim_create_user_command "JumperTerminal" toggle-or-open-terminal {})
 
 (fn M.setup []
   (set vim.g.loaded_jumper 1))
