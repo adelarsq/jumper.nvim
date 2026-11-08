@@ -56,7 +56,8 @@ local function get_db(path)
   return or_5_
 end
 local function ensure_table(db)
-  return db:eval("CREATE TABLE IF NOT EXISTS files (\n    file text not null,\n    path text not null\n  )")
+  db:eval("CREATE TABLE IF NOT EXISTS files (\n    file text not null,\n    path text not null\n  )")
+  return db:eval("CREATE TABLE IF NOT EXISTS bookmarks (\n    file text not null,\n    path text not null,\n    lnum integer not null,\n    note text not null\n  )")
 end
 local function load_files_for_dir(dir)
   local db = get_db(get_db_path_for_cwd())
@@ -78,6 +79,26 @@ local function load_files_for_dir(dir)
     return {}
   end
 end
+local function load_bookmarks_for_dir(dir)
+  local db = get_db(get_db_path_for_cwd())
+  ensure_table(db)
+  local rows = db:eval("select file, lnum, note from bookmarks where path = :path order by file, lnum", {path = dir})
+  if (type(rows) == "table") then
+    local tbl_26_ = {}
+    local i_27_ = 0
+    for _, row in ipairs(rows) do
+      local val_28_ = {file = row.file, lnum = row.lnum, note = row.note}
+      if (nil ~= val_28_) then
+        i_27_ = (i_27_ + 1)
+        tbl_26_[i_27_] = val_28_
+      else
+      end
+    end
+    return tbl_26_
+  else
+    return {}
+  end
+end
 local function save_files_for_dir(dir, file_list)
   local db = get_db(get_db_path_for_cwd())
   ensure_table(db)
@@ -87,7 +108,19 @@ local function save_files_for_dir(dir, file_list)
   end
   return nil
 end
+local function save_bookmark(dir, file, lnum, note)
+  local db = get_db(get_db_path_for_cwd())
+  ensure_table(db)
+  db:eval("delete from bookmarks where path = :path and file = :file and lnum = :lnum", {path = dir, file = file, lnum = lnum})
+  return db:eval("insert into bookmarks (path, file, lnum, note) values (:path, :file, :lnum, :note)", {path = dir, file = file, lnum = lnum, note = note})
+end
+local function remove_bookmarks_for_file(dir, file)
+  local db = get_db(get_db_path_for_cwd())
+  ensure_table(db)
+  return db:eval("delete from bookmarks where path = :path and file = :file", {path = dir, file = file})
+end
 local files = {}
+local bookmarks = {}
 local current_dir = vim.fn.getcwd()
 local function clear_files_table()
   while (#files > 0) do
@@ -95,13 +128,24 @@ local function clear_files_table()
   end
   return nil
 end
+local function clear_bookmarks_table()
+  while (#bookmarks > 0) do
+    table.remove(bookmarks)
+  end
+  return nil
+end
 local function reload_files()
   local dir = vim.fn.getcwd()
-  local persisted = load_files_for_dir(dir)
+  local persisted_files = load_files_for_dir(dir)
+  local persisted_bookmarks = load_bookmarks_for_dir(dir)
   current_dir = dir
   clear_files_table()
-  for _, f in ipairs(persisted) do
+  for _, f in ipairs(persisted_files) do
     table.insert(files, f)
+  end
+  clear_bookmarks_table()
+  for _, b in ipairs(persisted_bookmarks) do
+    table.insert(bookmarks, b)
   end
   vim.g.file_list = files
   return nil
@@ -157,32 +201,99 @@ local function add_current_file()
     return nil
   end
 end
+local function bookmark_exists_3f(file, lnum)
+  local found = false
+  for _, b in ipairs(bookmarks) do
+    if ((b.file == file) and (b.lnum == lnum)) then
+      found = true
+    else
+    end
+  end
+  return found
+end
+local function remove_bookmark_from_memory(file, lnum)
+  local new_list = {}
+  for _, b in ipairs(bookmarks) do
+    if not ((b.file == file) and (b.lnum == lnum)) then
+      table.insert(new_list, b)
+    else
+    end
+  end
+  clear_bookmarks_table()
+  for _, b in ipairs(new_list) do
+    table.insert(bookmarks, b)
+  end
+  return nil
+end
+local function add_bookmark()
+  local current_file = get_current_file_path()
+  if ((current_file == "") or not vim.bo.modifiable or (vim.bo.buftype == "terminal")) then
+    return vim.api.nvim_echo({{"Cannot bookmark this buffer.", "WarningMsg"}}, false, {})
+  else
+    if not vim.tbl_contains(files, current_file) then
+      table.insert(files, current_file)
+      persist_files()
+    else
+    end
+    local lnum = vim.fn.line(".")
+    local default = ("line " .. lnum)
+    local note = vim.fn.input(("Bookmark comment for line " .. lnum .. ": "), default)
+    if (note == "") then
+      return vim.api.nvim_echo({{"Bookmark cancelled.", "WarningMsg"}}, false, {})
+    else
+      save_bookmark(current_dir, current_file, lnum, note)
+      remove_bookmark_from_memory(current_file, lnum)
+      table.insert(bookmarks, {file = current_file, lnum = lnum, note = note})
+      return vim.api.nvim_echo({{("Bookmarked " .. vim.fn.fnamemodify(current_file, ":t") .. ":" .. lnum .. " -> " .. note)}}, false, {})
+    end
+  end
+end
 local function get_file_list()
-  if (#files == 0) then
-    return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
+  if ((#files == 0) and (#bookmarks == 0)) then
+    return vim.api.nvim_echo({{"No files or bookmarks in the list.", "WarningMsg"}}, false, {})
   else
     local items = {}
-    for i, file in ipairs(files) do
-      table.insert(items, {index = i, filename = file, text = file})
+    for _, file in ipairs(files) do
+      table.insert(items, {kind = "file", filename = file, text = vim.fn.fnamemodify(file, ":~")})
+      for _0, b in ipairs(bookmarks) do
+        if (b.file == file) then
+          table.insert(items, {kind = "bookmark", filename = file, lnum = b.lnum, note = b.note, text = ("  \226\148\148\226\148\128 " .. b.lnum .. ": " .. b.note)})
+        else
+        end
+      end
     end
-    local function _14_(item)
-      return (item.index .. ": " .. vim.fn.fnamemodify(item.filename, ":~"))
+    for _, b in ipairs(bookmarks) do
+      if not vim.tbl_contains(files, b.file) then
+        table.insert(items, {kind = "bookmark", filename = b.file, lnum = b.lnum, note = b.note, text = (vim.fn.fnamemodify(b.file, ":~") .. " \226\148\148\226\148\128 " .. b.lnum .. ": " .. b.note)})
+      else
+      end
     end
-    local function _15_(choice)
+    local function _23_(item)
+      return item.text
+    end
+    local function _24_(choice)
       if choice then
-        return vim.cmd(("edit " .. choice.filename))
+        if (choice.kind == "file") then
+          return vim.cmd(("edit " .. vim.fn.fnameescape(choice.filename)))
+        else
+          vim.cmd(("edit " .. vim.fn.fnameescape(choice.filename)))
+          vim.api.nvim_win_set_cursor(0, {choice.lnum, 0})
+          return vim.cmd("normal! zz")
+        end
       else
         return nil
       end
     end
-    return vim.ui.select(items, {prompt = "Select file to open:", format_item = _14_, kind = "file"}, _15_)
+    return vim.ui.select(items, {prompt = "Select file or bookmark:", format_item = _23_, kind = "jumper"}, _24_)
   end
 end
 local function get_file_list_quickfix()
   local list = {}
-  for i, file in ipairs(files) do
-    local dic = {filename = file, text = (i .. ": " .. vim.fn.fnamemodify(file, ":~"))}
-    table.insert(list, dic)
+  for _, file in ipairs(files) do
+    table.insert(list, {filename = file, text = vim.fn.fnamemodify(file, ":~")})
+  end
+  for _, b in ipairs(bookmarks) do
+    table.insert(list, {filename = b.file, lnum = b.lnum, text = ("  \226\148\148\226\148\128 " .. b.lnum .. ": " .. b.note)})
   end
   vim.fn.setqflist(list)
   return vim.cmd("bel copen 10")
@@ -192,7 +303,7 @@ local function remove_current_file()
   if ((current_file == "") or not vim.tbl_contains(files, current_file)) then
     return vim.api.nvim_echo({{"Current file is not in the list.", "WarningMsg"}}, false, {})
   else
-    local confirm = vim.fn.confirm(("Remove \"" .. vim.fn.fnamemodify(current_file, ":~") .. "\" from the list?"), "&Yes\n&No", 2)
+    local confirm = vim.fn.confirm(("Remove \"" .. vim.fn.fnamemodify(current_file, ":~") .. "\" (and its bookmarks) from the list?"), "&Yes\n&No", 2)
     if (confirm == 1) then
       local new_list = {}
       for _, file in ipairs(files) do
@@ -205,7 +316,19 @@ local function remove_current_file()
       for _, file in ipairs(new_list) do
         table.insert(files, file)
       end
+      local new_bms = {}
+      for _, b in ipairs(bookmarks) do
+        if (b.file ~= current_file) then
+          table.insert(new_bms, b)
+        else
+        end
+      end
+      clear_bookmarks_table()
+      for _, b in ipairs(new_bms) do
+        table.insert(bookmarks, b)
+      end
       persist_files()
+      remove_bookmarks_for_file(current_dir, current_file)
       return vim.api.nvim_echo({{("Removed " .. vim.fn.fnamemodify(current_file, ":~") .. " from the list.")}}, false, {})
     else
       return nil
@@ -216,10 +339,16 @@ local function clear_file_list()
   if (#files == 0) then
     return vim.api.nvim_echo({{"No files in the list.", "WarningMsg"}}, false, {})
   else
-    local confirm = vim.fn.confirm(("Clear all " .. #files .. " file(s) from the list?"), "&Yes\n&No", 2)
+    local confirm = vim.fn.confirm(("Clear all " .. #files .. " file(s) and their bookmarks from the list?"), "&Yes\n&No", 2)
     if (confirm == 1) then
       clear_files_table()
+      clear_bookmarks_table()
       persist_files()
+      do
+        local db = get_db(get_db_path_for_cwd())
+        ensure_table(db)
+        db:eval("delete from bookmarks where path = :path", {path = current_dir})
+      end
       return vim.api.nvim_echo({{"File list cleared.", "WarningMsg"}}, false, {})
     else
       return nil
@@ -230,7 +359,7 @@ local function navigate_to_file(index)
   local len = #files
   if (index and (index >= 1) and (index <= len)) then
     local file = files[index]
-    return vim.cmd(("edit " .. file))
+    return vim.cmd(("edit " .. vim.fn.fnameescape(file)))
   else
     return vim.api.nvim_echo({{("Invalid index: " .. (index or "nil") .. ". Valid range: 1-" .. len), "ErrorMsg"}}, false, {})
   end
@@ -356,12 +485,13 @@ local function navigate_to_previous_file_global()
     end
   end
 end
-local function _43_()
+local function _54_()
   reload_files()
   return vim.api.nvim_echo({{("Jumper: carregada lista para " .. vim.fn.getcwd())}}, false, {})
 end
-vim.api.nvim_create_autocmd("DirChanged", {callback = _43_})
+vim.api.nvim_create_autocmd("DirChanged", {callback = _54_})
 vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
+vim.api.nvim_create_user_command("JumperAddBookmark", add_bookmark, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
 vim.api.nvim_create_user_command("JumperListQF", get_file_list_quickfix, {})
 vim.api.nvim_create_user_command("JumperClear", clear_file_list, {})

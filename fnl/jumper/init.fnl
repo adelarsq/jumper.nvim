@@ -53,11 +53,17 @@
         (tset db-connections path db)
         db)))
 
-;; Garante que a tabela `files` existe no banco (usando SQL direto com IF NOT EXISTS)
+;; Garante que as tabelas `files` e `bookmarks` existem no banco.
 (fn ensure-table [db]
   (db:eval "CREATE TABLE IF NOT EXISTS files (
     file text not null,
     path text not null
+  )")
+  (db:eval "CREATE TABLE IF NOT EXISTS bookmarks (
+    file text not null,
+    path text not null,
+    lnum integer not null,
+    note text not null
   )"))
 
 ;; Retorna a lista de arquivos persistida para um diretório.
@@ -69,6 +75,16 @@
           (icollect [_ row (ipairs rows)] row.file)
           []))))
 
+;; Retorna os bookmarks persistidos para um diretório.
+(fn load-bookmarks-for-dir [dir]
+  (let [db (get-db (get-db-path-for-cwd))]
+    (ensure-table db)
+    (let [rows (db:eval "select file, lnum, note from bookmarks where path = :path order by file, lnum" {:path dir})]
+      (if (= (type rows) :table)
+          (icollect [_ row (ipairs rows)]
+            {:file row.file :lnum row.lnum :note row.note})
+          []))))
+
 ;; Substitui a lista de arquivos persistida para um diretório.
 (fn save-files-for-dir [dir file-list]
   (let [db (get-db (get-db-path-for-cwd))]
@@ -78,11 +94,30 @@
       (db:eval "insert into files (path, file) values (:path, :file)"
                {:path dir :file file}))))
 
+;; Persiste um bookmark (adiciona ou atualiza).
+(fn save-bookmark [dir file lnum note]
+  (let [db (get-db (get-db-path-for-cwd))]
+    (ensure-table db)
+    (db:eval "delete from bookmarks where path = :path and file = :file and lnum = :lnum"
+             {:path dir :file file :lnum lnum})
+    (db:eval "insert into bookmarks (path, file, lnum, note) values (:path, :file, :lnum, :note)"
+             {:path dir :file file :lnum lnum :note note})))
+
+;; Remove todos os bookmarks de um arquivo.
+(fn remove-bookmarks-for-file [dir file]
+  (let [db (get-db (get-db-path-for-cwd))]
+    (ensure-table db)
+    (db:eval "delete from bookmarks where path = :path and file = :file"
+             {:path dir :file file})))
+
 ;; ============================================================================
 ;; Estado em memória (cache) — mantido em sincronia com o banco
 ;; ============================================================================
 
 (local files [])
+
+;; bookmarks: lista de {:file :lnum :note}
+(local bookmarks [])
 
 (var current-dir (vim.fn.getcwd))
 
@@ -91,14 +126,23 @@
   (while (> (length files) 0)
     (table.remove files)))
 
-;; Carrega a lista persistida do diretório atual para `files`.
+;; Limpa a tabela `bookmarks` em memória.
+(fn clear-bookmarks-table []
+  (while (> (length bookmarks) 0)
+    (table.remove bookmarks)))
+
+;; Carrega a lista persistida do diretório atual para `files` e `bookmarks`.
 (fn reload-files []
   (let [dir (vim.fn.getcwd)
-        persisted (load-files-for-dir dir)]
+        persisted-files (load-files-for-dir dir)
+        persisted-bookmarks (load-bookmarks-for-dir dir)]
     (set current-dir dir)
     (clear-files-table)
-    (each [_ f (ipairs persisted)]
+    (each [_ f (ipairs persisted-files)]
       (table.insert files f))
+    (clear-bookmarks-table)
+    (each [_ b (ipairs persisted-bookmarks)]
+      (table.insert bookmarks b))
     (set vim.g.file_list files)))
 
 ;; Sincroniza a lista em memória com o banco para o diretório atual.
@@ -149,26 +193,100 @@
       (persist-files)
       (vim.api.nvim_echo [[(.. "Added " current-file " to the list.")]] false {}))))
 
+;; Retorna true se um bookmark (file, lnum) já existe.
+(fn bookmark-exists? [file lnum]
+  (var found false)
+  (each [_ b (ipairs bookmarks)]
+    (when (and (= b.file file) (= b.lnum lnum))
+      (set found true)))
+  found)
+
+;; Remove um bookmark (file, lnum) da memória.
+(fn remove-bookmark-from-memory [file lnum]
+  (var new-list [])
+  (each [_ b (ipairs bookmarks)]
+    (when (not (and (= b.file file) (= b.lnum lnum)))
+      (table.insert new-list b)))
+  (clear-bookmarks-table)
+  (each [_ b (ipairs new-list)]
+    (table.insert bookmarks b)))
+
+;; Adiciona um bookmark na linha atual (com comentário).
+;; Também executa JumperAdd sobre o arquivo.
+(fn add-bookmark []
+  (let [current-file (get-current-file-path)]
+    (if (or (= current-file "") (not vim.bo.modifiable) (= vim.bo.buftype :terminal))
+        (vim.api.nvim_echo [["Cannot bookmark this buffer." "WarningMsg"]] false {})
+        (do
+          ;; Garante que o arquivo está na lista (JumperAdd)
+          (when (not (vim.tbl_contains files current-file))
+            (table.insert files current-file)
+            (persist-files))
+          ;; Pede o comentário
+          (let [lnum (vim.fn.line ".")
+                default (.. "line " lnum)
+                note (vim.fn.input (.. "Bookmark comment for line " lnum ": ") default)]
+            (if (= note "")
+                (vim.api.nvim_echo [["Bookmark cancelled." "WarningMsg"]] false {})
+                (do
+                  (save-bookmark current-dir current-file lnum note)
+                  (remove-bookmark-from-memory current-file lnum)
+                  (table.insert bookmarks {:file current-file :lnum lnum :note note})
+                  (vim.api.nvim_echo
+                    [[(.. "Bookmarked " (vim.fn.fnamemodify current-file ":t")
+                          ":" lnum " -> " note)]]
+                    false {}))))))))
+
+
 (fn get-file-list []
-  (if (= (length files) 0)
-      (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
+  (if (and (= (length files) 0) (= (length bookmarks) 0))
+      (vim.api.nvim_echo [["No files or bookmarks in the list." "WarningMsg"]] false {})
       (let [items []]
-        (each [i file (ipairs files)]
-          (table.insert items {:index i :filename file :text file}))
+        ;; Para cada arquivo, insere o cabeçalho e logo abaixo os seus bookmarks
+        (each [_ file (ipairs files)]
+          (table.insert items
+            {:kind :file
+             :filename file
+             :text (vim.fn.fnamemodify file ":~")})
+          (each [_ b (ipairs bookmarks)]
+            (when (= b.file file)
+              (table.insert items
+                {:kind :bookmark
+                 :filename file
+                 :lnum b.lnum
+                 :note b.note
+                 :text (.. "  └─ " b.lnum ": " b.note)}))))
+        ;; Bookmarks de arquivos que não estão em `files` (segurança) — no final
+        (each [_ b (ipairs bookmarks)]
+          (when (not (vim.tbl_contains files b.file))
+            (table.insert items
+              {:kind :bookmark
+               :filename b.file
+               :lnum b.lnum
+               :note b.note
+               :text (.. (vim.fn.fnamemodify b.file ":~") " └─ " b.lnum ": " b.note)})))
         (vim.ui.select items
-          {:prompt "Select file to open:"
-           :format_item (fn [item]
-                          (.. item.index ": " (vim.fn.fnamemodify item.filename ":~")))
-           :kind "file"}
+          {:prompt "Select file or bookmark:"
+           :format_item (fn [item] item.text)
+           :kind "jumper"}
           (fn [choice]
             (when choice
-              (vim.cmd (.. "edit " choice.filename))))))))
+              (if (= choice.kind :file)
+                  (vim.cmd (.. "edit " (vim.fn.fnameescape choice.filename)))
+                  (do
+                    (vim.cmd (.. "edit " (vim.fn.fnameescape choice.filename)))
+                    (vim.api.nvim_win_set_cursor 0 [choice.lnum 0])
+                    (vim.cmd "normal! zz")))))))))
 
 (fn get-file-list-quickfix []
   (local list [])
-  (each [i file (ipairs files)]
-    (local dic {:filename file :text (.. i ": " (vim.fn.fnamemodify file ":~"))})
-    (table.insert list dic))
+  (each [_ file (ipairs files)]
+    (table.insert list {:filename file
+                        :text (vim.fn.fnamemodify file ":~")}))
+  (each [_ b (ipairs bookmarks)]
+    (table.insert list {:filename b.file
+                        :lnum b.lnum
+                        :text (.. "  └─ " b.lnum ": " b.note)}))
   (vim.fn.setqflist list)
   (vim.cmd "bel copen 10"))
 
@@ -179,7 +297,7 @@
         (vim.api.nvim_echo [["Current file is not in the list." "WarningMsg"]] false {})
         (let [confirm (vim.fn.confirm
                         (.. "Remove \"" (vim.fn.fnamemodify current-file ":~")
-                            "\" from the list?")
+                            "\" (and its bookmarks) from the list?")
                         "&Yes\n&No" 2)]
           (when (= confirm 1)
             (var new-list [])
@@ -189,7 +307,16 @@
             (clear-files-table)
             (each [_ file (ipairs new-list)]
               (table.insert files file))
+            ;; Remove bookmarks do arquivo (memória e banco)
+            (var new-bms [])
+            (each [_ b (ipairs bookmarks)]
+              (when (not= b.file current-file)
+                (table.insert new-bms b)))
+            (clear-bookmarks-table)
+            (each [_ b (ipairs new-bms)]
+              (table.insert bookmarks b))
             (persist-files)
+            (remove-bookmarks-for-file current-dir current-file)
             (vim.api.nvim_echo
               [[(.. "Removed " (vim.fn.fnamemodify current-file ":~") " from the list.")]]
               false {}))))))
@@ -199,18 +326,23 @@
   (if (= (length files) 0)
       (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
       (let [confirm (vim.fn.confirm
-                      (.. "Clear all " (length files) " file(s) from the list?")
+                      (.. "Clear all " (length files) " file(s) and their bookmarks from the list?")
                       "&Yes\n&No" 2)]
         (when (= confirm 1)
           (clear-files-table)
+          (clear-bookmarks-table)
           (persist-files)
+          ;; Limpa bookmarks do diretório no banco
+          (let [db (get-db (get-db-path-for-cwd))]
+            (ensure-table db)
+            (db:eval "delete from bookmarks where path = :path" {:path current-dir}))
           (vim.api.nvim_echo [["File list cleared." "WarningMsg"]] false {})))))
 
 (fn navigate-to-file [index]
   (let [len (length files)]
     (if (and index (>= index 1) (<= index len))
         (let [file (. files index)]
-          (vim.cmd (.. "edit " file)))
+          (vim.cmd (.. "edit " (vim.fn.fnameescape file))))
         (vim.api.nvim_echo [[(.. "Invalid index: " (or index "nil") ". Valid range: 1-" len) "ErrorMsg"]] false {}))))
 
 (fn get-current-file-index []
@@ -263,11 +395,9 @@
         (vim.api.nvim_echo [["No files in the list." "WarningMsg"]] false {})
         (let [current-index (get-current-file-index)]
           (if (< current-index 1)
-              ;; Current file not in list, start from last
               (navigate-to-file len)
               (let [current-dir (get-file-dir (. files current-index))]
                 (var prev-index nil)
-                ;; Search backward for previous file in same directory (with wrap)
                 (for [offset 1 len]
                   (when (not prev-index)
                     (let [candidate-index (if (<= (- current-index offset) 0)
@@ -307,6 +437,7 @@
 ;; ============================================================================
 
 (vim.api.nvim_create_user_command "JumperAdd" add-current-file {})
+(vim.api.nvim_create_user_command "JumperAddBookmark" add-bookmark {})
 (vim.api.nvim_create_user_command "JumperList" get-file-list {})
 (vim.api.nvim_create_user_command "JumperListQF" get-file-list-quickfix {})
 (vim.api.nvim_create_user_command "JumperClear" clear-file-list {})
