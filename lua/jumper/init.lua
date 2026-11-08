@@ -119,6 +119,11 @@ local function remove_bookmarks_for_file(dir, file)
   ensure_table(db)
   return db:eval("delete from bookmarks where path = :path and file = :file", {path = dir, file = file})
 end
+local function remove_bookmark_from_db(dir, file, lnum)
+  local db = get_db(get_db_path_for_cwd())
+  ensure_table(db)
+  return db:eval("delete from bookmarks where path = :path and file = :file and lnum = :lnum", {path = dir, file = file, lnum = lnum})
+end
 local files = {}
 local bookmarks = {}
 local current_dir = vim.fn.getcwd()
@@ -131,6 +136,67 @@ end
 local function clear_bookmarks_table()
   while (#bookmarks > 0) do
     table.remove(bookmarks)
+  end
+  return nil
+end
+local function define_sign()
+  return vim.fn.sign_define("JumperBookmark", {text = "\226\154\145", texthl = "DiagnosticWarn", numhl = "DiagnosticWarn"})
+end
+define_sign()
+local function bookmarks_for_file(file)
+  local tbl_26_ = {}
+  local i_27_ = 0
+  for _, b in ipairs(bookmarks) do
+    local val_28_
+    if (b.file == file) then
+      val_28_ = b
+    else
+      val_28_ = nil
+    end
+    if (nil ~= val_28_) then
+      i_27_ = (i_27_ + 1)
+      tbl_26_[i_27_] = val_28_
+    else
+    end
+  end
+  return tbl_26_
+end
+local function clear_signs_in_buffer(bufnr)
+  return vim.fn.sign_unplace("jumper", {buffer = bufnr})
+end
+local function refresh_signs_in_buffer(bufnr, file)
+  if vim.api.nvim_buf_is_valid(bufnr) then
+    clear_signs_in_buffer(bufnr)
+    for _, b in ipairs(bookmarks_for_file(file)) do
+      if ((b.lnum >= 1) and (b.lnum <= vim.api.nvim_buf_line_count(bufnr))) then
+        vim.fn.sign_place(0, "jumper", "JumperBookmark", bufnr, {lnum = b.lnum, priority = 10})
+      else
+      end
+    end
+    return nil
+  else
+    return nil
+  end
+end
+local function refresh_signs_current_buffer()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local file = vim.fn.expand("%:p")
+  if (file ~= "") then
+    return refresh_signs_in_buffer(bufnr, file)
+  else
+    return nil
+  end
+end
+local function refresh_all_signs()
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      local name = vim.api.nvim_buf_get_name(bufnr)
+      if (name ~= "") then
+        refresh_signs_in_buffer(bufnr, name)
+      else
+      end
+    else
+    end
   end
   return nil
 end
@@ -148,7 +214,7 @@ local function reload_files()
     table.insert(bookmarks, b)
   end
   vim.g.file_list = files
-  return nil
+  return refresh_all_signs()
 end
 local function persist_files()
   save_files_for_dir(current_dir, files)
@@ -244,7 +310,25 @@ local function add_bookmark()
       save_bookmark(current_dir, current_file, lnum, note)
       remove_bookmark_from_memory(current_file, lnum)
       table.insert(bookmarks, {file = current_file, lnum = lnum, note = note})
+      refresh_signs_current_buffer()
       return vim.api.nvim_echo({{("Bookmarked " .. vim.fn.fnamemodify(current_file, ":t") .. ":" .. lnum .. " -> " .. note)}}, false, {})
+    end
+  end
+end
+local function remove_current_bookmark()
+  local current_file = get_current_file_path()
+  local lnum = vim.fn.line(".")
+  if ((current_file == "") or not bookmark_exists_3f(current_file, lnum)) then
+    return vim.api.nvim_echo({{"No bookmark on the current line.", "WarningMsg"}}, false, {})
+  else
+    local confirm = vim.fn.confirm(("Remove bookmark at " .. vim.fn.fnamemodify(current_file, ":t") .. ":" .. lnum .. "?"), "&Yes\n&No", 2)
+    if (confirm == 1) then
+      remove_bookmark_from_memory(current_file, lnum)
+      remove_bookmark_from_db(current_dir, current_file, lnum)
+      refresh_signs_current_buffer()
+      return vim.api.nvim_echo({{("Bookmark removed from " .. vim.fn.fnamemodify(current_file, ":t") .. ":" .. lnum .. ".")}}, false, {})
+    else
+      return nil
     end
   end
 end
@@ -268,10 +352,10 @@ local function get_file_list()
       else
       end
     end
-    local function _23_(item)
+    local function _32_(item)
       return item.text
     end
-    local function _24_(choice)
+    local function _33_(choice)
       if choice then
         if (choice.kind == "file") then
           return vim.cmd(("edit " .. vim.fn.fnameescape(choice.filename)))
@@ -284,7 +368,7 @@ local function get_file_list()
         return nil
       end
     end
-    return vim.ui.select(items, {prompt = "Select file or bookmark:", format_item = _23_, kind = "jumper"}, _24_)
+    return vim.ui.select(items, {prompt = "Select file or bookmark:", format_item = _32_, kind = "jumper"}, _33_)
   end
 end
 local function get_file_list_quickfix()
@@ -329,6 +413,7 @@ local function remove_current_file()
       end
       persist_files()
       remove_bookmarks_for_file(current_dir, current_file)
+      refresh_signs_current_buffer()
       return vim.api.nvim_echo({{("Removed " .. vim.fn.fnamemodify(current_file, ":~") .. " from the list.")}}, false, {})
     else
       return nil
@@ -348,6 +433,12 @@ local function clear_file_list()
         local db = get_db(get_db_path_for_cwd())
         ensure_table(db)
         db:eval("delete from bookmarks where path = :path", {path = current_dir})
+      end
+      for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(bufnr) then
+          clear_signs_in_buffer(bufnr)
+        else
+        end
       end
       return vim.api.nvim_echo({{"File list cleared.", "WarningMsg"}}, false, {})
     else
@@ -485,13 +576,28 @@ local function navigate_to_previous_file_global()
     end
   end
 end
-local function _54_()
+local function _64_(args)
+  local bufnr = args.buf
+  local file = vim.api.nvim_buf_get_name(bufnr)
+  if (file ~= "") then
+    return refresh_signs_in_buffer(bufnr, file)
+  else
+    return nil
+  end
+end
+vim.api.nvim_create_autocmd("BufReadPost", {callback = _64_})
+local function _66_(args)
+  return clear_signs_in_buffer(args.buf)
+end
+vim.api.nvim_create_autocmd("BufWipeout", {callback = _66_})
+local function _67_()
   reload_files()
   return vim.api.nvim_echo({{("Jumper: carregada lista para " .. vim.fn.getcwd())}}, false, {})
 end
-vim.api.nvim_create_autocmd("DirChanged", {callback = _54_})
+vim.api.nvim_create_autocmd("DirChanged", {callback = _67_})
 vim.api.nvim_create_user_command("JumperAdd", add_current_file, {})
 vim.api.nvim_create_user_command("JumperAddBookmark", add_bookmark, {})
+vim.api.nvim_create_user_command("JumperRemoveBookmark", remove_current_bookmark, {})
 vim.api.nvim_create_user_command("JumperList", get_file_list, {})
 vim.api.nvim_create_user_command("JumperListQF", get_file_list_quickfix, {})
 vim.api.nvim_create_user_command("JumperClear", clear_file_list, {})

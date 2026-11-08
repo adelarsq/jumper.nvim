@@ -110,6 +110,13 @@
     (db:eval "delete from bookmarks where path = :path and file = :file"
              {:path dir :file file})))
 
+;; Remove um bookmark específico (file, lnum) do banco.
+(fn remove-bookmark-from-db [dir file lnum]
+  (let [db (get-db (get-db-path-for-cwd))]
+    (ensure-table db)
+    (db:eval "delete from bookmarks where path = :path and file = :file and lnum = :lnum"
+             {:path dir :file file :lnum lnum})))
+
 ;; ============================================================================
 ;; Estado em memória (cache) — mantido em sincronia com o banco
 ;; ============================================================================
@@ -131,6 +138,56 @@
   (while (> (length bookmarks) 0)
     (table.remove bookmarks)))
 
+;; ============================================================================
+;; Signs (bandeirinha de bookmark) — declarados APÓS `bookmarks` existir
+;; ============================================================================
+
+;; Define o sign "JumperBookmark" (bandeirinha) uma única vez.
+(fn define-sign []
+  (vim.fn.sign_define "JumperBookmark"
+    {:text "⚑"
+     :texthl "DiagnosticWarn"
+     :numhl "DiagnosticWarn"}))
+
+(define-sign)
+
+;; Retorna os bookmarks de um arquivo (do cache em memória).
+(fn bookmarks-for-file [file]
+  (icollect [_ b (ipairs bookmarks)]
+    (when (= b.file file) b)))
+
+;; Remove todos os signs de bookmark de um buffer.
+(fn clear-signs-in-buffer [bufnr]
+  (vim.fn.sign_unplace "jumper" {:buffer bufnr}))
+
+;; Coloca signs em todas as linhas bookmarkadas do buffer.
+(fn refresh-signs-in-buffer [bufnr file]
+  (when (vim.api.nvim_buf_is_valid bufnr)
+    (clear-signs-in-buffer bufnr)
+    (each [_ b (ipairs (bookmarks-for-file file))]
+      (when (and (>= b.lnum 1) (<= b.lnum (vim.api.nvim_buf_line_count bufnr)))
+        (vim.fn.sign_place 0 "jumper" "JumperBookmark" bufnr
+          {:lnum b.lnum :priority 10})))))
+
+;; Atualiza signs no buffer atual (se ele corresponde ao arquivo).
+(fn refresh-signs-current-buffer []
+  (let [bufnr (vim.api.nvim_get_current_buf)
+        file (vim.fn.expand "%:p")]
+    (when (not= file "")
+      (refresh-signs-in-buffer bufnr file))))
+
+;; Reaplica signs em todos os buffers abertos (após reload de bookmarks).
+(fn refresh-all-signs []
+  (each [_ bufnr (ipairs (vim.api.nvim_list_bufs))]
+    (when (vim.api.nvim_buf_is_loaded bufnr)
+      (let [name (vim.api.nvim_buf_get_name bufnr)]
+        (when (not= name "")
+          (refresh-signs-in-buffer bufnr name))))))
+
+;; ============================================================================
+;; Reload / persist (agora podem usar refresh-all-signs)
+;; ============================================================================
+
 ;; Carrega a lista persistida do diretório atual para `files` e `bookmarks`.
 (fn reload-files []
   (let [dir (vim.fn.getcwd)
@@ -143,7 +200,8 @@
     (clear-bookmarks-table)
     (each [_ b (ipairs persisted-bookmarks)]
       (table.insert bookmarks b))
-    (set vim.g.file_list files)))
+    (set vim.g.file_list files)
+    (refresh-all-signs)))
 
 ;; Sincroniza a lista em memória com o banco para o diretório atual.
 (fn persist-files []
@@ -232,11 +290,31 @@
                   (save-bookmark current-dir current-file lnum note)
                   (remove-bookmark-from-memory current-file lnum)
                   (table.insert bookmarks {:file current-file :lnum lnum :note note})
+                  (refresh-signs-current-buffer)
                   (vim.api.nvim_echo
                     [[(.. "Bookmarked " (vim.fn.fnamemodify current-file ":t")
                           ":" lnum " -> " note)]]
                     false {}))))))))
 
+;; Remove o bookmark da linha atual (com confirmação).
+(fn remove-current-bookmark []
+  (let [current-file (get-current-file-path)
+        lnum (vim.fn.line ".")]
+    (if (or (= current-file "") (not (bookmark-exists? current-file lnum)))
+        (vim.api.nvim_echo
+          [["No bookmark on the current line." "WarningMsg"]] false {})
+        (let [confirm (vim.fn.confirm
+                        (.. "Remove bookmark at "
+                            (vim.fn.fnamemodify current-file ":t") ":" lnum "?")
+                        "&Yes\n&No" 2)]
+          (when (= confirm 1)
+            (remove-bookmark-from-memory current-file lnum)
+            (remove-bookmark-from-db current-dir current-file lnum)
+            (refresh-signs-current-buffer)
+            (vim.api.nvim_echo
+              [[(.. "Bookmark removed from "
+                    (vim.fn.fnamemodify current-file ":t") ":" lnum ".")]]
+              false {}))))))
 
 (fn get-file-list []
   (if (and (= (length files) 0) (= (length bookmarks) 0))
@@ -317,6 +395,7 @@
               (table.insert bookmarks b))
             (persist-files)
             (remove-bookmarks-for-file current-dir current-file)
+            (refresh-signs-current-buffer)
             (vim.api.nvim_echo
               [[(.. "Removed " (vim.fn.fnamemodify current-file ":~") " from the list.")]]
               false {}))))))
@@ -336,6 +415,10 @@
           (let [db (get-db (get-db-path-for-cwd))]
             (ensure-table db)
             (db:eval "delete from bookmarks where path = :path" {:path current-dir}))
+          ;; Remove todos os signs de todos os buffers
+          (each [_ bufnr (ipairs (vim.api.nvim_list_bufs))]
+            (when (vim.api.nvim_buf_is_loaded bufnr)
+              (clear-signs-in-buffer bufnr)))
           (vim.api.nvim_echo [["File list cleared." "WarningMsg"]] false {})))))
 
 (fn navigate-to-file [index]
@@ -422,8 +505,21 @@
               (navigate-to-file len))))))
 
 ;; ============================================================================
-;; Auto-reload quando o diretório de trabalho muda
+;; Autocmds: signs ao abrir buffers + reload ao mudar de diretório
 ;; ============================================================================
+
+;; Ao carregar/abrir um buffer, aplica os signs dos bookmarks daquele arquivo.
+(vim.api.nvim_create_autocmd "BufReadPost"
+  {:callback (fn [args]
+               (let [bufnr args.buf
+                     file (vim.api.nvim_buf_get_name bufnr)]
+                 (when (not= file "")
+                   (refresh-signs-in-buffer bufnr file))))})
+
+;; Ao fechar um buffer, remove os signs dele.
+(vim.api.nvim_create_autocmd "BufWipeout"
+  {:callback (fn [args]
+               (clear-signs-in-buffer args.buf))})
 
 (vim.api.nvim_create_autocmd "DirChanged"
   {:callback (fn []
@@ -438,6 +534,7 @@
 
 (vim.api.nvim_create_user_command "JumperAdd" add-current-file {})
 (vim.api.nvim_create_user_command "JumperAddBookmark" add-bookmark {})
+(vim.api.nvim_create_user_command "JumperRemoveBookmark" remove-current-bookmark {})
 (vim.api.nvim_create_user_command "JumperList" get-file-list {})
 (vim.api.nvim_create_user_command "JumperListQF" get-file-list-quickfix {})
 (vim.api.nvim_create_user_command "JumperClear" clear-file-list {})
