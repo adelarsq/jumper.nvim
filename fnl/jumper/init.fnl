@@ -316,6 +316,64 @@
                     (vim.fn.fnamemodify current-file ":t") ":" lnum ".")]]
               false {}))))))
 
+;; Retorna a lista de linhas (ordenadas) dos bookmarks do arquivo atual.
+(fn get-bookmark-lines-for-current-file []
+  (let [file (vim.fn.expand "%:p")
+        lines []]
+    (each [_ b (ipairs bookmarks)]
+      (when (= b.file file)
+        (table.insert lines b.lnum)))
+    (table.sort lines)
+    lines))
+
+;; Vai para o próximo bookmark no arquivo atual (com wrap-around).
+(fn navigate-to-next-bookmark []
+  (let [file (vim.fn.expand "%:p")]
+    (if (= file "")
+        (vim.api.nvim_echo [["No file in the current buffer." "WarningMsg"]] false {})
+        (let [lines (get-bookmark-lines-for-current-file)]
+          (if (= (length lines) 0)
+              (vim.api.nvim_echo
+                [["No bookmarks in the current file." "WarningMsg"]] false {})
+              (let [cur (vim.fn.line ".")]
+                (var target nil)
+                ;; Procura o primeiro bookmark com lnum > cur
+                (each [_ l (ipairs lines)]
+                  (when (and (not target) (> l cur))
+                    (set target l)))
+                ;; Se não achou, dá a volta para o primeiro
+                (if target
+                    (do
+                      (vim.api.nvim_win_set_cursor 0 [target 0])
+                      (vim.cmd "normal! zz"))
+                    (do
+                      (vim.api.nvim_win_set_cursor 0 [(. lines 1) 0])
+                      (vim.cmd "normal! zz")))))))))
+
+;; Vai para o bookmark anterior no arquivo atual (com wrap-around).
+(fn navigate-to-previous-bookmark []
+  (let [file (vim.fn.expand "%:p")]
+    (if (= file "")
+        (vim.api.nvim_echo [["No file in the current buffer." "WarningMsg"]] false {})
+        (let [lines (get-bookmark-lines-for-current-file)]
+          (if (= (length lines) 0)
+              (vim.api.nvim_echo
+                [["No bookmarks in the current file." "WarningMsg"]] false {})
+              (let [cur (vim.fn.line ".")]
+                (var target nil)
+                ;; Percorre de trás para frente procurando o primeiro com lnum < cur
+                (for [i (length lines) 1 -1]
+                  (when (and (not target) (< (. lines i) cur))
+                    (set target (. lines i))))
+                ;; Se não achou, dá a volta para o último
+                (if target
+                    (do
+                      (vim.api.nvim_win_set_cursor 0 [target 0])
+                      (vim.cmd "normal! zz"))
+                    (do
+                      (vim.api.nvim_win_set_cursor 0 [(. lines (length lines)) 0])
+                      (vim.cmd "normal! zz")))))))))
+
 (fn get-file-list []
   (if (and (= (length files) 0) (= (length bookmarks) 0))
       (vim.api.nvim_echo [["No files or bookmarks in the list." "WarningMsg"]] false {})
@@ -535,6 +593,8 @@
 (vim.api.nvim_create_user_command "JumperAdd" add-current-file {})
 (vim.api.nvim_create_user_command "JumperAddBookmark" add-bookmark {})
 (vim.api.nvim_create_user_command "JumperRemoveBookmark" remove-current-bookmark {})
+(vim.api.nvim_create_user_command "JumperNextBookmark" navigate-to-next-bookmark {})
+(vim.api.nvim_create_user_command "JumperPreviousBookmark" navigate-to-previous-bookmark {})
 (vim.api.nvim_create_user_command "JumperList" get-file-list {})
 (vim.api.nvim_create_user_command "JumperListQF" get-file-list-quickfix {})
 (vim.api.nvim_create_user_command "JumperClear" clear-file-list {})
